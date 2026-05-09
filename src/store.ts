@@ -611,53 +611,111 @@ Use .agent-bridge as the source of truth when multiple agents work together.
 function agentsTemplateText(): string {
   return `## Agent Skill Bridge
 
-Use \`.agent-bridge\` as the coordination source of truth when collaborating with Claude or another agent.
+\`.agent-bridge/\` is your coordination channel with Claude. The bridge lets you reach Claude without going through the human, so you can keep moving when the human is not present.
 
 Before editing:
 
 1. Read \`.agent-bridge/context/project.md\`.
 2. Read \`.agent-bridge/context/constraints.md\`.
-3. Check \`.agent-bridge/inbox/codex/\` for questions, answers, reviews, and handoffs.
+3. Check \`.agent-bridge/inbox/codex/\` for questions, answers, reviews, and handoffs from Claude.
 4. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 5. Claim your task with \`agent-bridge task claim TASK-ID --agent codex --files path/to/file\`.
 
-During work:
+Auto-coordinate before escalating to the human. Reach out to Claude when you:
 
-- If blocked, send Claude a structured question with \`agent-bridge message send claude --from codex --intent question --task TASK-ID --body "Question: ... Context: ... What I tried: ... Needed from you: ..."\`.
-- If handing off, use \`agent-bridge handoff TASK-ID --from codex --to claude --summary "..." --files path/to/file --remaining "..." --risks "..." --verification "..."\`.
-- If Claude owns a file, do not overwrite it without a handoff or human approval.
-- Run \`agent-bridge validate\` before stopping.
+- Are about to retry the same failing operation a third time (you are looping).
+- Hit an error you do not understand and would otherwise guess at the fix.
+- Are about to take a destructive or hard-to-reverse action whose blast radius is non-obvious.
+- Need a second opinion on an architectural or design tradeoff.
+- Are stuck on something Claude is better at (long-form reasoning, prose, design review, untangling complex specs).
 
-Before stopping:
+Send a structured question:
 
-- Create a handoff with changed files, remaining work, risks, and verification.
-- Mark the task done only when acceptance criteria are satisfied.
+\`\`\`bash
+agent-bridge message send claude \\
+  --from codex \\
+  --task TASK-ID \\
+  --intent question \\
+  --files path/to/file \\
+  --body "Question: ... Context: ... What I tried: ... Needed from you: ..."
+\`\`\`
+
+Then re-read \`.agent-bridge/inbox/codex/\` before continuing. If Claude has not replied yet, do other useful work or ask the human. Do not block.
+
+If Claude should take over, hand off:
+
+\`\`\`bash
+agent-bridge handoff TASK-ID --from codex --to claude \\
+  --summary "..." --files path/to/file \\
+  --remaining "..." --risks "..." --verification "..."
+\`\`\`
+
+Coordination rules:
+
+- Do not erase Claude's inbox artifacts or task records.
+- If Claude owns a file (it is in a claimed task assigned to claude), do not overwrite it without a handoff, an inbox agreement, or human approval.
+- Put durable conclusions in \`.agent-bridge/context/decisions.md\`.
+- Run \`agent-bridge validate\` before stopping. Resolve protocol errors and active conflicts.
+- Before stopping, create a handoff if work remains. Mark the task done only when acceptance criteria are satisfied.
 `;
 }
 
 function claudeTemplateText(): string {
   return `## Agent Skill Bridge
 
-Use \`.agent-bridge\` as the coordination source of truth when collaborating with Codex or another agent.
+\`.agent-bridge/\` is your coordination channel with Codex. The bridge lets you reach Codex without going through the human, so you can keep moving when the human is not present.
 
 Before editing:
 
 1. Read \`.agent-bridge/context/project.md\`.
 2. Read \`.agent-bridge/context/constraints.md\`.
-3. Check \`.agent-bridge/inbox/claude/\` for questions, answers, reviews, and handoffs.
+3. Check \`.agent-bridge/inbox/claude/\` for questions, answers, reviews, and handoffs from Codex.
 4. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 5. Claim your task with \`agent-bridge task claim TASK-ID --agent claude --files path/to/file\`.
 
-During work:
+Auto-coordinate before escalating to the human. Reach out to Codex when you:
 
-- If blocked, send Codex a structured question with \`agent-bridge message send codex --from claude --intent question --task TASK-ID --body "Question: ... Context: ... What I tried: ... Needed from you: ..."\`.
-- If reviewing Codex work, send \`agent-bridge message send codex --from claude --intent review --task TASK-ID --body "Findings: ... Questions: ... Test gaps: ... Summary: ..."\`.
-- If Codex owns a file, do not overwrite it without a handoff or human approval.
-- Run \`agent-bridge validate\` before stopping.
+- Are about to retry the same failing operation a third time (you are looping).
+- Hit an error you do not understand and would otherwise guess at the fix.
+- Are about to take a destructive or hard-to-reverse action whose blast radius is non-obvious.
+- Need a second opinion on a code tradeoff or architectural call.
+- Are blocked on something Codex is better at (multi-file refactor, long-running shell that you cannot supervise, infra setup, repo-wide grep-and-replace).
 
-Before stopping:
+Send a structured question:
 
-- Create a handoff with changed files, remaining work, risks, and verification.
-- Mark the task done only when acceptance criteria are satisfied.
+\`\`\`bash
+agent-bridge message send codex \\
+  --from claude \\
+  --task TASK-ID \\
+  --intent question \\
+  --files path/to/file \\
+  --body "Question: ... Context: ... What I tried: ... Needed from you: ..."
+\`\`\`
+
+Then re-read \`.agent-bridge/inbox/claude/\` before continuing. If Codex has not replied yet, do other useful work or ask the human. Do not block.
+
+For review:
+
+\`\`\`bash
+agent-bridge message send codex --from claude --task TASK-ID --intent review \\
+  --files path/to/file \\
+  --body "Findings: ... Questions: ... Test gaps: ... Summary: ..."
+\`\`\`
+
+If Codex should take over, hand off:
+
+\`\`\`bash
+agent-bridge handoff TASK-ID --from claude --to codex \\
+  --summary "..." --files path/to/file \\
+  --remaining "..." --risks "..." --verification "..."
+\`\`\`
+
+Coordination rules:
+
+- Do not erase Codex's inbox artifacts or task records.
+- If Codex owns a file (it is in a claimed task assigned to codex), do not overwrite it without a handoff, an inbox agreement, or human approval.
+- Put durable conclusions in \`.agent-bridge/context/decisions.md\`.
+- Run \`agent-bridge validate\` before stopping. Resolve protocol errors and active conflicts.
+- Before stopping, create a handoff if work remains. Mark the task done only when acceptance criteria are satisfied.
 `;
 }

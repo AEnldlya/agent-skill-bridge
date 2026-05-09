@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { MESSAGE_INTENTS, MessageIntent } from "./protocol.js";
 import { BridgeStore } from "./store.js";
@@ -202,7 +203,21 @@ function parseIntent(value: string | undefined): MessageIntent {
   return MESSAGE_INTENTS.includes(value as MessageIntent) ? value as MessageIntent : "note";
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Detect "this file was invoked directly" in a way that survives symlinks.
+// `npm link` (and other symlink-based installs) puts the bin at a path whose
+// realpath differs from `process.argv[1]`, which would make the naive
+// import.meta.url comparison miss and silently no-op the entire CLI.
+function isMainModule(argvPath: string | undefined): boolean {
+  if (!argvPath) return false;
+  if (import.meta.url === pathToFileURL(argvPath).href) return true;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argvPath)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule(process.argv[1])) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`agent-bridge: ${message}`);
