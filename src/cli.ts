@@ -12,13 +12,14 @@ export interface ParsedArgs {
 const helpText = `agent-bridge
 
 Commands:
-  init
+  init [--install-templates]
   task create "Title" [--created-by codex] [--files src/a.ts] [--acceptance "works,tests pass"]
-  task claim TASK-ID --agent codex [--files src/a.ts]
+  task claim TASK-ID --agent codex [--files src/a.ts] [--force]
   task done TASK-ID
   message send claude --from codex --body "Can you review this?"
-  handoff TASK-ID --from codex --to claude --summary "API is ready"
+  handoff TASK-ID --from codex --to claude --summary "API is ready" [--force]
   status
+  validate
 
 Global options:
   --root <path>   Project root, defaults to the current directory
@@ -37,6 +38,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   if (command === "init") {
     await store.init();
+    if (parsed.options["install-templates"]) {
+      const result = await store.installTemplates();
+      for (const file of result.installed) {
+        console.log(`Installed ${file}`);
+      }
+      for (const file of result.skipped) {
+        console.log(`Skipped ${file}, Agent Skill Bridge section already exists`);
+      }
+    }
     console.log(`Initialized ${store.bridgeDir}`);
     return;
   }
@@ -59,7 +69,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const task = await store.claimTask({
       id: requiredPositional(maybeId, "task id"),
       agent: stringOption(parsed, "agent", true),
-      files: parseList(stringOption(parsed, "files", false))
+      files: parseList(stringOption(parsed, "files", false)),
+      force: Boolean(parsed.options.force)
     });
     console.log(`${task.id} claimed by ${task.owner}`);
     return;
@@ -93,7 +104,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       changedFiles: parseList(stringOption(parsed, "files", false)),
       remainingWork: parseList(stringOption(parsed, "remaining", false)),
       risks: parseList(stringOption(parsed, "risks", false)),
-      verification: parseList(stringOption(parsed, "verification", false))
+      verification: parseList(stringOption(parsed, "verification", false)),
+      force: Boolean(parsed.options.force)
     });
     console.log(`Created ${handoff.id} for ${handoff.taskId}`);
     return;
@@ -108,6 +120,27 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     for (const task of tasks) {
       const owner = task.owner ? ` @${task.owner}` : "";
       console.log(`${task.id} [${task.status}${owner}] ${task.title}`);
+    }
+    const conflicts = await store.findConflicts();
+    for (const conflict of conflicts) {
+      console.log(`CONFLICT ${conflict.file}: ${conflict.taskIds.join(", ")} (${conflict.owners.join(", ")})`);
+    }
+    return;
+  }
+
+  if (command === "validate") {
+    const report = await store.validate();
+    for (const error of report.errors) {
+      console.log(`ERROR ${error}`);
+    }
+    for (const warning of report.warnings) {
+      console.log(`WARN ${warning}`);
+    }
+    if (report.ok) {
+      console.log("Bridge protocol valid.");
+    } else {
+      console.log(`Bridge protocol invalid: ${report.errors.length} errors, ${report.conflicts.length} conflicts.`);
+      process.exitCode = 1;
     }
     return;
   }

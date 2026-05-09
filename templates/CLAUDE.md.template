@@ -1,25 +1,54 @@
 ## Agent Skill Bridge
 
-Use `.agent-bridge` as the coordination source of truth when collaborating with Codex or another agent.
+Use `.agent-bridge/` as the coordination source of truth when collaborating with Codex, another agent, or a human across tasks, sessions, or uncertainty.
 
-Before editing:
+Before starting shared work, inspect:
 
-1. Read `.agent-bridge/context/project.md`.
-2. Read `.agent-bridge/context/constraints.md`.
-3. Read `.agent-bridge/context/decisions.md`.
-4. Check `.agent-bridge/inbox/claude/` for questions, answers, reviews, and handoffs.
-5. Check `.agent-bridge/tasks/open/`, `.agent-bridge/tasks/claimed/`, and `.agent-bridge/tasks/blocked/`.
-6. Claim your task with `agent-bridge task claim TASK-ID --agent claude --files path/to/file`.
+1. `.agent-bridge/context/project.md` for product and repo context.
+2. `.agent-bridge/context/constraints.md` for boundaries, ownership notes, and files to avoid.
+3. `.agent-bridge/context/decisions.md` for durable human-approved decisions.
+4. `.agent-bridge/inbox/claude/` for questions, answers, reviews, handoffs, and status messages addressed to Claude.
+5. `.agent-bridge/tasks/open/`, `.agent-bridge/tasks/claimed/`, and `.agent-bridge/tasks/blocked/` for task state.
 
-During work:
+Claim a task before editing files:
 
-- If blocked, send Codex a message with `agent-bridge message send codex --from claude --intent question --task TASK-ID --body "Question: ... Context: ... What I tried: ... Needed from you: ..."`.
-- If reviewing Codex work, send `agent-bridge message send codex --from claude --intent review --task TASK-ID --body "Findings: ... Questions: ... Test gaps: ... Summary: ..."`.
-- If handing off, use `agent-bridge handoff TASK-ID --from claude --to codex --summary "..." --files path/to/file --remaining "..." --risks "..." --verification "..."`.
-- If Codex owns a file, do not overwrite it without a handoff or human approval.
-- If you disagree with Codex, write both recommendations and ask the human to choose.
+```bash
+agent-bridge task claim TASK-ID --agent claude --files src/file.ts,test/file.test.ts
+```
 
-Before stopping:
+If the claim reports a file conflict, pause and coordinate with Codex or the human. Use `--force` only after the overlap is intentional and approved by a handoff, inbox agreement, or human instruction.
 
-- Create a handoff with changed files, remaining work, risks, and verification.
-- Mark the task done only when acceptance criteria are satisfied.
+Ask Codex for focused implementation help, verification, debugging, repo edits, or a second opinion:
+
+```bash
+agent-bridge message send codex \
+  --from claude \
+  --task TASK-ID \
+  --intent question \
+  --files src/file.ts,test/file.test.ts \
+  --body "Question: ... Context: ... What I tried: ... Needed from you: ..."
+```
+
+Use handoffs when Codex should continue, implement, verify, or take ownership:
+
+```bash
+agent-bridge handoff TASK-ID \
+  --from claude \
+  --to codex \
+  --summary "What changed and why." \
+  --files src/file.ts,test/file.test.ts \
+  --remaining "Specific next step for Codex" \
+  --risks "Known risk or uncertainty" \
+  --verification "Command run and result"
+```
+
+Coordination rules:
+
+- Do not erase Codex inbox artifacts or task records.
+- Do not assume hidden chat context will survive. Put important state in bridge files.
+- If Codex owns a file, do not overwrite it without a handoff, an inbox agreement, or human approval.
+- `--force` bypasses conflict detection only for an intentional overlap. It does not merge source changes or permit reverting another agent's work.
+- Put durable conclusions in `.agent-bridge/context/decisions.md`.
+- Run `agent-bridge validate` before stopping.
+
+Before stopping, resolve protocol errors and active conflicts when possible. Create a handoff with changed files, remaining work, risks, and verification if another agent or future session should continue.

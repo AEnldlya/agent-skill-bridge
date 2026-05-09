@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -7,8 +7,7 @@ import { parseArgs } from "../src/cli.js";
 import { BridgeStore } from "../src/store.js";
 
 test("creates, claims, messages, and handoffs through protocol files", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "agent-bridge-"));
-  try {
+  await withTempRoot(async (root) => {
     const store = new BridgeStore({ root });
     await store.init();
 
@@ -58,9 +57,95 @@ test("creates, claims, messages, and handoffs through protocol files", async () 
       await readFile(path.join(root, ".agent-bridge", "inbox", "claude", `${message.id}.json`), "utf8")
     );
     assert.equal(inboxMessage.intent, "question");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  });
+});
+
+test("conflicting file claims throw unless forced", async () => {
+  await withTempRoot(async (root) => {
+    const store = new BridgeStore({ root });
+    const first = await store.createTask({
+      title: "Touch shared module",
+      createdBy: "codex",
+      files: ["src/shared.ts"]
+    });
+    const second = await store.createTask({
+      title: "Refactor shared module",
+      createdBy: "claude",
+      files: ["src\\shared.ts"]
+    });
+
+    await store.claimTask({ id: first.id, agent: "codex" });
+
+    await assert.rejects(
+      store.claimTask({ id: second.id, agent: "claude" }),
+      /File claim conflict: src\/shared\.ts is already claimed by codex, claude/
+    );
+
+    const forced = await store.claimTask({ id: second.id, agent: "claude", force: true });
+    assert.equal(forced.status, "claimed");
+    assert.equal(forced.owner, "claude");
+  });
+});
+
+test("status and validate report conflicting active file claims", async () => {
+  await withTempRoot(async (root) => {
+    const store = new BridgeStore({ root });
+    const first = await store.createTask({
+      title: "Own parser",
+      createdBy: "codex",
+      files: ["src/parser.ts"],
+      acceptanceCriteria: ["parses valid config"]
+    });
+    const second = await store.createTask({
+      title: "Update parser",
+      createdBy: "claude",
+      files: ["src\\parser.ts"],
+      acceptanceCriteria: ["handles invalid config"]
+    });
+
+    await store.claimTask({ id: first.id, agent: "codex" });
+    await store.claimTask({ id: second.id, agent: "claude", force: true });
+
+    const status = await store.status();
+    assert.deepEqual(status.conflicts, [
+      {
+        file: "src/parser.ts",
+        taskIds: [first.id, second.id],
+        owners: ["codex", "claude"]
+      }
+    ]);
+
+    const report = await store.validate();
+    assert.equal(report.ok, false);
+    assert.deepEqual(report.conflicts, status.conflicts);
+    assert.match(report.warnings.join("\n"), /src\/parser\.ts: claimed by .* across codex, claude/);
+  });
+});
+
+test("installTemplates writes AGENTS.md and CLAUDE.md without duplicating sections", async () => {
+  await withTempRoot(async (root) => {
+    const store = new BridgeStore({ root });
+    await writeFile(path.join(root, "AGENTS.md"), "# Existing Agent Notes\n\nKeep this section.\n", "utf8");
+
+    const firstInstall = await store.installTemplates();
+    assert.deepEqual(firstInstall.installed.sort(), ["AGENTS.md", "CLAUDE.md"]);
+    assert.deepEqual(firstInstall.skipped, []);
+
+    const agents = await readFile(path.join(root, "AGENTS.md"), "utf8");
+    const claude = await readFile(path.join(root, "CLAUDE.md"), "utf8");
+    assert.match(agents, /^# Existing Agent Notes/m);
+    assert.equal(sectionCount(agents, "## Agent Skill Bridge"), 1);
+    assert.equal(sectionCount(claude, "## Agent Skill Bridge"), 1);
+
+    const secondInstall = await store.installTemplates();
+    assert.deepEqual(secondInstall.installed, []);
+    assert.deepEqual(secondInstall.skipped.sort(), ["AGENTS.md", "CLAUDE.md"]);
+
+    const agentsAfterSecondInstall = await readFile(path.join(root, "AGENTS.md"), "utf8");
+    const claudeAfterSecondInstall = await readFile(path.join(root, "CLAUDE.md"), "utf8");
+    assert.equal(sectionCount(agentsAfterSecondInstall, "## Agent Skill Bridge"), 1);
+    assert.equal(sectionCount(claudeAfterSecondInstall, "## Agent Skill Bridge"), 1);
+  });
 });
 
 test("parses positional commands and options", () => {
@@ -77,3 +162,16 @@ test("parses positional commands and options", () => {
   assert.equal(parsed.options["created-by"], "codex");
   assert.equal(parsed.options.root, "C:/tmp/project");
 });
+
+async function withTempRoot(run: (root: string) => Promise<void>): Promise<void> {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-bridge-"));
+  try {
+    await run(root);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function sectionCount(content: string, marker: string): number {
+  return content.split(marker).length - 1;
+}

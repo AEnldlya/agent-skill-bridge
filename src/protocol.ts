@@ -49,8 +49,22 @@ export interface StatusSnapshot {
   root: string;
   bridgeDir: string;
   tasks: Record<TaskStatus, number> & { total: number };
+  conflicts: ConflictRecord[];
   latestMessages: MessageRecord[];
   latestHandoffs: HandoffRecord[];
+}
+
+export interface ConflictRecord {
+  file: string;
+  taskIds: string[];
+  owners: string[];
+}
+
+export interface ValidationReport {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  conflicts: ConflictRecord[];
 }
 
 export class ProtocolError extends Error {
