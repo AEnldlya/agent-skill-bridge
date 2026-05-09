@@ -1,0 +1,24 @@
+## Agent Skill Bridge
+
+Use `.agent-bridge` as the coordination source of truth when collaborating with Claude or another agent.
+
+Before editing:
+
+1. Read `.agent-bridge/context/project.md`.
+2. Read `.agent-bridge/context/constraints.md`.
+3. Read `.agent-bridge/context/decisions.md`.
+4. Check `.agent-bridge/inbox/codex/` for questions, answers, reviews, and handoffs.
+5. Check `.agent-bridge/tasks/open/`, `.agent-bridge/tasks/claimed/`, and `.agent-bridge/tasks/blocked/`.
+6. Claim your task with `agent-bridge task claim TASK-ID --agent codex --files path/to/file`.
+
+During work:
+
+- If blocked, send Claude a message with `agent-bridge message send claude --from codex --intent question --task TASK-ID --body "Question: ... Context: ... What I tried: ... Needed from you: ..."`.
+- If handing off, use `agent-bridge handoff TASK-ID --from codex --to claude --summary "..." --files path/to/file --remaining "..." --risks "..." --verification "..."`.
+- If Claude owns a file, do not overwrite it without a handoff or human approval.
+- Record human-approved decisions in `.agent-bridge/context/decisions.md`.
+
+Before stopping:
+
+- Create a handoff with changed files, remaining work, risks, and verification.
+- Mark the task done only when acceptance criteria are satisfied.
