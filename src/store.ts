@@ -173,6 +173,13 @@ export class BridgeStore {
     await mkdir(inboxDir, { recursive: true });
     await writeJson(path.join(inboxDir, `${message.id}.json`), message);
     await this.appendJsonLine(this.logPath("messages.jsonl"), message);
+    // Touch a fixed-name marker file at the project root so file-watcher hooks
+    // (e.g. Claude Code FileChanged with literal-filename matchers) can fire on
+    // a known path. The marker's mtime tracks the latest message; the file
+    // itself is empty and gitignored. Best-effort — never fail a send because
+    // of marker write trouble.
+    const markerPath = path.join(this.root, `.agent-bridge-notify-${message.recipient}`);
+    await writeFile(markerPath, `${message.id}\n`, "utf8").catch(() => undefined);
     return message;
   }
 
