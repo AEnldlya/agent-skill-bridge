@@ -106,7 +106,7 @@ Valid intents:
 
 Inbox records are addressed work items. Logs are history. Agents should not delete or rewrite another agent's inbox records.
 
-Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as actionable immediately.
+Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as actionable immediately.
 
 ## Conversation Records
 
@@ -150,8 +150,10 @@ Recommended sections:
 Write or replace a plan through:
 
 ```bash
-agent-bridge plan write TASK-ID --from codex --body "Goal: ...\nSteps: ...\nVerification: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...; Steps: ...; Verification: ..."
 ```
+
+In PowerShell, use a backtick newline such as `` `n `` or a here-string when you want multi-line plan text.
 
 ## Presence Records
 
@@ -176,7 +178,7 @@ agent-bridge presence update --agent codex --task TASK-ID --status working --fil
 
 ## Handoff Records
 
-Handoffs are appended to `.agent-bridge/logs/handoffs.jsonl`. A handoff also moves task ownership to the receiving agent.
+Handoffs are appended to `.agent-bridge/logs/handoffs.jsonl`. A handoff also moves task ownership to the receiving agent and writes a `handoff` message into the receiver inbox so `agent-bridge listen` can wake on the transfer.
 
 ```json
 {
@@ -194,6 +196,8 @@ Handoffs are appended to `.agent-bridge/logs/handoffs.jsonl`. A handoff also mov
 ```
 
 Use handoffs when another agent should continue, review, verify, or take ownership. Prefer the CLI so changed files, remaining work, risks, and verification are structured.
+
+A task has one active owner. For true parallel slices, create separate tasks per owner and coordinate them through the shared conversation or plan.
 
 ## Conflict Detection
 
@@ -282,7 +286,7 @@ agent-bridge listen --agent codex
 agent-bridge listen --agent claude --once
 ```
 
-The listener stores cursor files in `.agent-bridge/listeners/`. It marks actionable intents in output so an external runtime can wake the right agent for `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff`.
+The listener stores cursor files in `.agent-bridge/listeners/`. It marks actionable intents in output so an external runtime can wake the right agent for `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff`.
 
 ## Lifecycle
 
@@ -290,7 +294,7 @@ The listener stores cursor files in `.agent-bridge/listeners/`. It marks actiona
 2. Create a task or inspect existing task records.
 3. Claim the task before editing files.
 4. Use `conversation append` and `plan write` for substantial shared planning.
-5. Send `question`, `blocker`, `status`, `delegate`, `spawn_agents`, or `review_request` messages when another agent's help would reduce risk.
+5. Send `question`, `blocked`, `blocker`, `status`, `delegate`, `spawn_agents`, `review`, or `review_request` messages when another agent's help would reduce risk.
 6. Use a handoff when ownership changes or when a different agent should continue.
 7. Run `agent-bridge validate`.
 8. Mark the task `done` only after acceptance criteria are satisfied.
@@ -356,6 +360,18 @@ Count: ...
 Scopes: ...
 Expected output: ...
 ```
+
+For `delegate`:
+
+```text
+Goal: ...
+Scope/files: ...
+Acceptance: ...
+Expected owner: ...
+Verification: ...
+```
+
+Delegation is a request, not ownership transfer. The receiver replies with `accept`, `reject`, `proposal`, or `question`; accepted work should create or claim a task, or use `handoff` when ownership changes.
 
 For `proposal`:
 

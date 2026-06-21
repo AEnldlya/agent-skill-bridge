@@ -38,7 +38,7 @@ agent-bridge conversation append TASK-ID \
 Use a shared plan for multi-step work:
 
 ```bash
-agent-bridge plan write TASK-ID --from codex --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...; Steps: ...; Open questions: ..."
 ```
 
 Update presence when it helps the other agent know whether Codex is available:
@@ -51,7 +51,7 @@ agent-bridge presence update --agent codex --task TASK-ID --status working --fil
 
 Use specific intents: `question`, `answer`, `proposal`, `accept`, `reject`, `decision`, `request`, `delegate`, `spawn_agents`, `review_request`, `blocker`, `hold`, `handoff`, `status`, and `note`.
 
-Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as immediately actionable.
+Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as immediately actionable.
 
 ```bash
 agent-bridge message send claude \

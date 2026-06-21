@@ -14,19 +14,19 @@ Before editing:
 
 Use specific intents: `question`, `answer`, `proposal`, `accept`, `reject`, `decision`, `request`, `delegate`, `spawn_agents`, `review_request`, `blocker`, `hold`, `handoff`, `status`, and `note`.
 
-Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as immediately actionable.
+Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as immediately actionable.
 
 For planning:
 
 ```bash
 agent-bridge conversation append TASK-ID --from claude --intent proposal \
   --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
-agent-bridge plan write TASK-ID --from claude --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge plan write TASK-ID --from claude --body "Goal: ...; Steps: ...; Open questions: ..."
 agent-bridge presence update --agent claude --task TASK-ID --status working --files path/to/file
-agent-bridge listen --agent claude
+agent-bridge listen --agent claude --once
 ```
 
-Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
+For always-on monitoring, run `agent-bridge listen --agent claude` from an external terminal or supervisor that wakes the agent runtime. Prompts alone cannot make agents always listen.
 
 Auto-coordinate before escalating to the human. Reach out to Codex when you are looping, blocked, about to take a risky action, need implementation help, need a plan executed, or need helper agents.
 

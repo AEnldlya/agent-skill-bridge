@@ -27,7 +27,9 @@ export type MessageIntent = (typeof MESSAGE_INTENTS)[number];
 
 export const ACTIONABLE_MESSAGE_INTENTS = [
   "question",
+  "review",
   "review_request",
+  "blocked",
   "blocker",
   "delegate",
   "spawn_agents",

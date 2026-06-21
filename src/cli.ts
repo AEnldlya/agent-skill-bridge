@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { ACTIONABLE_MESSAGE_INTENTS, MESSAGE_INTENTS, MessageIntent } from "./protocol.js";
 import { BridgeStore } from "./store.js";
-import { parseList } from "./validation.js";
+import { parseList, requireSafePathSegment } from "./validation.js";
 
 export interface ParsedArgs {
   positionals: string[];
@@ -21,7 +21,7 @@ Commands:
   task done TASK-ID
   message send claude --from codex --body "Can you review this?"
   conversation append TASK-ID --from codex --intent proposal --body "Plan: ..."
-  plan write TASK-ID --from codex --body "Goal: ...\nSteps: ..."
+  plan write TASK-ID --from codex --body "Goal: ...; Steps: ..."
   presence update --agent codex [--task TASK-ID] [--status available] [--files src/a.ts] [--can-accept-work true]
   listen --agent codex [--once] [--interval 2000]
   handoff TASK-ID --from codex --to claude --summary "API is ready" [--force]
@@ -252,7 +252,9 @@ function requiredPositional(value: string | undefined, name: string): string {
 }
 
 function parseIntent(value: string | undefined): MessageIntent {
-  return MESSAGE_INTENTS.includes(value as MessageIntent) ? value as MessageIntent : "note";
+  if (!value) return "note";
+  if (MESSAGE_INTENTS.includes(value as MessageIntent)) return value as MessageIntent;
+  throw new Error(`Invalid --intent ${value}. Expected one of: ${MESSAGE_INTENTS.join(", ")}`);
 }
 
 function numberOption(parsed: ParsedArgs, name: string, fallback: number): number {
@@ -270,12 +272,13 @@ function booleanOption(parsed: ParsedArgs, name: string, fallback: boolean): boo
 }
 
 async function runListener(store: BridgeStore, agent: string, intervalMs: number, once: boolean): Promise<void> {
-  const seenPath = path.join(store.bridgeDir, "listeners", `.seen-${agent}.json`);
+  const safeAgent = requireSafePathSegment(agent, "agent");
+  const seenPath = path.join(store.bridgeDir, "listeners", `.seen-${safeAgent}.json`);
   await mkdir(path.dirname(seenPath), { recursive: true });
 
   while (true) {
     const seen = await loadSeen(seenPath);
-    const messages = await store.listInboxMessages(agent);
+    const messages = await store.listInboxMessages(safeAgent);
     const fresh = messages.filter(({ fileName, message }) => seen[fileName] !== message.createdAt);
 
     for (const { fileName, message } of fresh) {
@@ -293,7 +296,7 @@ async function runListener(store: BridgeStore, agent: string, intervalMs: number
     if (fresh.length > 0) {
       await writeFile(seenPath, JSON.stringify(seen, null, 2), "utf8");
     } else if (once) {
-      console.log(`No new messages for ${agent}.`);
+      console.log(`No new messages for ${safeAgent}.`);
     }
 
     if (once) return;

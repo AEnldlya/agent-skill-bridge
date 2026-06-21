@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { parseArgs } from "../src/cli.js";
+import { main, parseArgs } from "../src/cli.js";
 import { BridgeStore } from "../src/store.js";
 
 test("creates, claims, messages, and handoffs through protocol files", async () => {
@@ -78,7 +78,7 @@ test("creates, claims, messages, and handoffs through protocol files", async () 
     const status = await store.status();
     assert.equal(status.tasks.total, 1);
     assert.equal(status.tasks.claimed, 1);
-    assert.equal(status.latestMessages.length, 1);
+    assert.equal(status.latestMessages.length, 2);
     assert.equal(status.latestHandoffs.length, 1);
 
     const inboxMessage = JSON.parse(
@@ -98,6 +98,10 @@ test("creates, claims, messages, and handoffs through protocol files", async () 
     const inboxMessages = await store.listInboxMessages("claude");
     assert.equal(inboxMessages.length, 1);
     assert.equal(inboxMessages[0].message.intent, "spawn_agents");
+
+    const handoffMessages = await store.listInboxMessages("agent-b");
+    assert.equal(handoffMessages.length, 1);
+    assert.equal(handoffMessages[0].message.intent, "handoff");
 
     const report = await store.validate();
     assert.equal(report.ok, true);
@@ -128,6 +132,63 @@ test("conflicting file claims throw unless forced", async () => {
     const forced = await store.claimTask({ id: second.id, agent: "claude", force: true });
     assert.equal(forced.status, "claimed");
     assert.equal(forced.owner, "claude");
+  });
+});
+
+test("path-bearing ids and agents must be safe path segments", async () => {
+  await withTempRoot(async (root) => {
+    const store = new BridgeStore({ root });
+    const task = await store.createTask({
+      title: "Safe ids",
+      createdBy: "codex",
+      acceptanceCriteria: ["rejects traversal"]
+    });
+
+    await assert.rejects(
+      store.appendConversation({
+        taskId: "../escape",
+        from: "codex",
+        body: "bad"
+      }),
+      /safe path segment/
+    );
+
+    await assert.rejects(
+      store.writePlan({
+        taskId: "../escape",
+        from: "codex",
+        body: "bad"
+      }),
+      /safe path segment/
+    );
+
+    await assert.rejects(
+      store.updatePresence({
+        agent: "../escape",
+        taskId: task.id
+      }),
+      /safe path segment/
+    );
+
+    await assert.rejects(
+      store.sendMessage({
+        recipient: "../escape",
+        from: "codex",
+        body: "bad"
+      }),
+      /safe path segment/
+    );
+  });
+});
+
+test("listening to a new safe agent creates an empty inbox", async () => {
+  await withTempRoot(async (root) => {
+    const store = new BridgeStore({ root });
+    const messages = await store.listInboxMessages("helper-1");
+    assert.deepEqual(messages, []);
+
+    const inboxEntries = await readdir(path.join(root, ".agent-bridge", "inbox"));
+    assert.ok(inboxEntries.includes("helper-1"));
   });
 });
 
@@ -207,6 +268,13 @@ test("parses positional commands and options", () => {
   assert.deepEqual(parsed.positionals, ["task", "create", "Wire protocol"]);
   assert.equal(parsed.options["created-by"], "codex");
   assert.equal(parsed.options.root, "C:/tmp/project");
+});
+
+test("CLI rejects invalid message intents instead of downgrading to note", async () => {
+  await assert.rejects(
+    main(["message", "send", "claude", "--from", "codex", "--intent", "review-request", "--body", "typo"]),
+    /Invalid --intent review-request/
+  );
 });
 
 async function withTempRoot(run: (root: string) => Promise<void>): Promise<void> {

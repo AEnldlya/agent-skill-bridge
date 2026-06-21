@@ -1,6 +1,6 @@
 {
   "name": "agent-skill-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A file-based collaboration framework for Codex, Claude, and humans working in the same repository.",
   "type": "module",
   "bin": {

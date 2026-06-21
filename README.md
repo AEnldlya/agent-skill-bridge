@@ -92,7 +92,7 @@ agent-bridge task create "Build auth flow" --created-by human --files src/auth.t
 agent-bridge task claim TASK-ID --agent codex --files src/auth.ts
 agent-bridge message send claude --from codex --task TASK-ID --intent question --files src/auth.ts --body "Question: Can you review session expiry? Context: ..."
 agent-bridge conversation append TASK-ID --from codex --intent proposal --files src/auth.ts --body "Proposal: ..."
-agent-bridge plan write TASK-ID --from codex --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...; Steps: ...; Open questions: ..."
 agent-bridge presence update --agent codex --task TASK-ID --status working --files src/auth.ts
 agent-bridge listen --agent codex --once
 agent-bridge handoff TASK-ID --from codex --to claude --summary "Auth helper is ready" --files src/auth.ts --remaining "wire UI" --risks "browser QA still needed" --verification "npm test"
@@ -138,10 +138,12 @@ Each conversation appends JSONL to `.agent-bridge/conversations/TASK-ID.jsonl`.
 Use shared plans for multi-step work:
 
 ```bash
-agent-bridge plan write TASK-ID --from codex --body "Goal: ...\nSteps: ...\nVerification: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...; Steps: ...; Verification: ..."
 ```
 
 Plans live at `.agent-bridge/plans/TASK-ID.md`.
+
+In PowerShell, use a backtick newline such as `` `n `` or a here-string when you want multi-line plan text.
 
 Use presence when agents need to know who is around:
 
@@ -157,7 +159,7 @@ For always-on monitoring, run:
 agent-bridge listen --agent codex
 ```
 
-`listen` polls the recipient inbox and prints new messages, marking actionable intents such as `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff`. It can be run by a terminal, supervisor, hook, or future daemon. A model prompt by itself cannot listen continuously; something outside the model has to keep the listener running and wake the agent/runtime.
+`listen` polls the recipient inbox and prints new messages, marking actionable intents such as `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff`. It can be run by a terminal, supervisor, hook, or future daemon. A model prompt by itself cannot listen continuously; something outside the model has to keep the listener running and wake the agent/runtime.
 
 ## Safe `--force`
 
@@ -202,6 +204,8 @@ The intended loop is simple:
 
 This keeps the human out of the message-bus role while keeping the human in charge of decisions and conflict resolution.
 
+A task has one active owner. For true parallel slices, create separate tasks per owner and coordinate them through the shared conversation or plan. Use `handoff` when the original task changes owner.
+
 ## Documentation
 
 - [docs/protocol.md](docs/protocol.md) defines the `.agent-bridge/` file layout, record shapes, conflict rules, and validation behavior.
@@ -217,7 +221,7 @@ Agents should treat `.agent-bridge/` as the coordination source of truth:
 2. Claim a task before editing files.
 3. Use conversations and plans for shared reasoning.
 4. Message the other agent when blocked, uncertain, delegating, asking for review, or ready for handoff.
-5. Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as actionable immediately.
+5. Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as actionable immediately.
 6. Handoff with changed files, remaining work, risks, and verification.
 7. Do not revert another agent's work without human approval.
 8. Put durable decisions in `.agent-bridge/context/decisions.md`.

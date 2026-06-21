@@ -23,6 +23,7 @@ import {
   assertMessageRecord,
   assertPresenceRecord,
   assertTaskRecord,
+  requireSafePathSegment,
   requireString
 } from "./validation.js";
 
@@ -150,7 +151,7 @@ export class BridgeStore {
       id: makeId("TASK"),
       title: requireString(input.title, "title"),
       status: "open",
-      createdBy: input.createdBy ? requireString(input.createdBy, "createdBy") : undefined,
+      createdBy: input.createdBy ? requireSafePathSegment(input.createdBy, "createdBy") : undefined,
       createdAt,
       updatedAt: createdAt,
       dependencies: input.dependencies ?? [],
@@ -168,7 +169,7 @@ export class BridgeStore {
     await this.init();
     const task = await this.readTask(input.id);
     const previousPath = this.taskPath(task);
-    const owner = requireString(input.agent, "agent");
+    const owner = requireSafePathSegment(input.agent, "agent");
     const files = mergeLists(task.files, input.files ?? []);
     if (!input.force) {
       const conflicts = await this.findConflictsForFiles(files, task.id, owner);
@@ -193,9 +194,9 @@ export class BridgeStore {
     await this.init();
     const message: MessageRecord = {
       id: makeId("MSG"),
-      taskId: input.taskId ? requireString(input.taskId, "task") : undefined,
-      sender: requireString(input.from, "from"),
-      recipient: requireString(input.recipient, "recipient"),
+      taskId: input.taskId ? requireSafePathSegment(input.taskId, "task") : undefined,
+      sender: requireSafePathSegment(input.from, "from"),
+      recipient: requireSafePathSegment(input.recipient, "recipient"),
       intent: input.intent ?? "note",
       body: requireString(input.body, "body"),
       createdAt: nowIso(),
@@ -220,10 +221,10 @@ export class BridgeStore {
     await this.init();
     const conversation: ConversationRecord = {
       id: makeId("CONVO"),
-      taskId: requireString(input.taskId, "taskId"),
-      sender: requireString(input.from, "from"),
-      recipient: input.recipient ? requireString(input.recipient, "recipient") : undefined,
-      room: input.room ? requireString(input.room, "room") : input.taskId,
+      taskId: requireSafePathSegment(input.taskId, "taskId"),
+      sender: requireSafePathSegment(input.from, "from"),
+      recipient: input.recipient ? requireSafePathSegment(input.recipient, "recipient") : undefined,
+      room: input.room ? requireSafePathSegment(input.room, "room") : input.taskId,
       intent: input.intent ?? "note",
       body: requireString(input.body, "body"),
       createdAt: nowIso(),
@@ -236,10 +237,10 @@ export class BridgeStore {
 
   async writePlan(input: WritePlanInput): Promise<string> {
     await this.init();
-    const taskId = requireString(input.taskId, "taskId");
+    const taskId = requireSafePathSegment(input.taskId, "taskId");
     const body = requireString(input.body, "body");
     const heading = `# Plan: ${taskId}`;
-    const attribution = input.from ? `\n\nUpdated by: ${requireString(input.from, "from")}\n` : "";
+    const attribution = input.from ? `\n\nUpdated by: ${requireSafePathSegment(input.from, "from")}\n` : "";
     const content = body.startsWith("#") ? `${body.replace(/\s+$/, "")}\n` : `${heading}${attribution}\n${body.replace(/\s+$/, "")}\n`;
     const filePath = path.join(this.bridgeDir, "plans", `${taskId}.md`);
     await writeFile(filePath, content, "utf8");
@@ -249,9 +250,9 @@ export class BridgeStore {
   async updatePresence(input: UpdatePresenceInput): Promise<PresenceRecord> {
     await this.init();
     const presence: PresenceRecord = {
-      agent: requireString(input.agent, "agent"),
+      agent: requireSafePathSegment(input.agent, "agent"),
       status: input.status ? requireString(input.status, "status") : "available",
-      taskId: input.taskId ? requireString(input.taskId, "taskId") : undefined,
+      taskId: input.taskId ? requireSafePathSegment(input.taskId, "taskId") : undefined,
       files: input.files ?? [],
       canAcceptWork: input.canAcceptWork ?? true,
       lastSeen: nowIso()
@@ -263,8 +264,9 @@ export class BridgeStore {
 
   async listInboxMessages(agent: string): Promise<InboxMessage[]> {
     await this.init();
-    const inboxDir = path.join(this.bridgeDir, "inbox", requireString(agent, "agent"));
+    const inboxDir = path.join(this.bridgeDir, "inbox", requireSafePathSegment(agent, "agent"));
     const messages: InboxMessage[] = [];
+    await mkdir(inboxDir, { recursive: true });
     for (const entry of await readdir(inboxDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       const parsed = JSON.parse(await readFile(path.join(inboxDir, entry.name), "utf8")) as unknown;
@@ -277,7 +279,7 @@ export class BridgeStore {
   async handoff(input: HandoffInput): Promise<HandoffRecord> {
     await this.init();
     const task = await this.readTask(input.taskId);
-    const to = requireString(input.to, "to");
+    const to = requireSafePathSegment(input.to, "to");
     const files = mergeLists(task.files, input.changedFiles ?? []);
     if (!input.force) {
       const conflicts = await this.findConflictsForFiles(files, task.id, to);
@@ -303,6 +305,14 @@ export class BridgeStore {
     task.updatedAt = handoff.createdAt;
     await this.writeTask(task);
     await this.appendJsonLine(this.logPath("handoffs.jsonl"), handoff);
+    await this.sendMessage({
+      recipient: handoff.to,
+      taskId: handoff.taskId,
+      from: handoff.from,
+      intent: "handoff",
+      body: handoff.summary,
+      files: handoff.changedFiles
+    });
     return handoff;
   }
 
@@ -448,7 +458,7 @@ export class BridgeStore {
   }
 
   private async readTask(id: string): Promise<TaskRecord> {
-    const taskId = requireString(id, "task id");
+    const taskId = requireSafePathSegment(id, "task id");
     for (const status of TASK_STATUSES) {
       const filePath = path.join(this.taskStatusDir(status), `${taskId}.json`);
       try {
@@ -785,15 +795,16 @@ Use \`.agent-bridge/\` as the source of truth when Claude, Codex, helper agents,
 
 Use specific intents so the recipient knows whether action is required: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`.
 
-Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
 ## Delegation
 
-Agents may ask each other to take work, review work, or spawn helper agents. Delegation is a request until accepted. Reply with \`accept\`, \`reject\`, \`proposal\`, or \`question\`, then claim or create tasks for accepted work.
+Agents may ask each other to take work, review work, or spawn helper agents. Delegation is a request, not ownership transfer. Reply with \`accept\`, \`reject\`, \`proposal\`, or \`question\`, then claim or create tasks for accepted work.
 
 ## Presence And Listening
 
 - Update availability with \`agent-bridge presence update --agent <agent> --status available --task TASK-ID --files path/to/file\`.
+- Run \`agent-bridge listen --agent <agent> --once\` for a one-shot inbox check.
 - Run \`agent-bridge listen --agent <agent>\` from a terminal, hook supervisor, or automation when always-on inbox monitoring is needed.
 - Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
 
@@ -822,19 +833,19 @@ Before editing:
 6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 7. Claim your task with \`agent-bridge task claim TASK-ID --agent codex --files path/to/file\`.
 
-Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
 For planning:
 
 \`\`\`bash
 agent-bridge conversation append TASK-ID --from codex --intent proposal \\
   --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
-agent-bridge plan write TASK-ID --from codex --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...; Steps: ...; Open questions: ..."
 agent-bridge presence update --agent codex --task TASK-ID --status working --files path/to/file
-agent-bridge listen --agent codex
+agent-bridge listen --agent codex --once
 \`\`\`
 
-Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
+For always-on monitoring, run \`agent-bridge listen --agent codex\` from an external terminal or supervisor that wakes the agent runtime. Prompts alone cannot make agents always listen.
 
 Auto-coordinate before escalating to the human. Reach out to Claude when you:
 
@@ -894,19 +905,19 @@ Before editing:
 6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 7. Claim your task with \`agent-bridge task claim TASK-ID --agent claude --files path/to/file\`.
 
-Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
 For planning:
 
 \`\`\`bash
 agent-bridge conversation append TASK-ID --from claude --intent proposal \\
   --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
-agent-bridge plan write TASK-ID --from claude --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge plan write TASK-ID --from claude --body "Goal: ...; Steps: ...; Open questions: ..."
 agent-bridge presence update --agent claude --task TASK-ID --status working --files path/to/file
-agent-bridge listen --agent claude
+agent-bridge listen --agent claude --once
 \`\`\`
 
-Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
+For always-on monitoring, run \`agent-bridge listen --agent claude\` from an external terminal or supervisor that wakes the agent runtime. Prompts alone cannot make agents always listen.
 
 Auto-coordinate before escalating to the human. Reach out to Codex when you:
 

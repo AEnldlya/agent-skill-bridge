@@ -17,6 +17,14 @@ export function requireString(value: unknown, name: string): string {
   return value.trim();
 }
 
+export function requireSafePathSegment(value: unknown, name: string): string {
+  const segment = requireString(value, name);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)) {
+    throw new ProtocolError(`${name} must be a safe path segment using only letters, digits, dot, underscore, or hyphen`);
+  }
+  return segment;
+}
+
 export function parseList(value: string | undefined): string[] {
   if (!value) return [];
   return value
@@ -27,7 +35,7 @@ export function parseList(value: string | undefined): string[] {
 
 export function assertTaskRecord(value: unknown): asserts value is TaskRecord {
   const record = asObject(value, "task");
-  requireString(record.id, "task.id");
+  requireSafePathSegment(record.id, "task.id");
   requireString(record.title, "task.title");
   requireString(record.createdAt, "task.createdAt");
   requireString(record.updatedAt, "task.updatedAt");
@@ -35,8 +43,8 @@ export function assertTaskRecord(value: unknown): asserts value is TaskRecord {
   if (typeof record.status !== "string" || !TASK_STATUSES.includes(record.status as never)) {
     throw new ProtocolError(`task.status must be one of ${TASK_STATUSES.join(", ")}`);
   }
-  if (record.owner !== undefined) requireString(record.owner, "task.owner");
-  if (record.createdBy !== undefined) requireString(record.createdBy, "task.createdBy");
+  if (record.owner !== undefined) requireSafePathSegment(record.owner, "task.owner");
+  if (record.createdBy !== undefined) requireSafePathSegment(record.createdBy, "task.createdBy");
   assertStringArray(record.dependencies, "task.dependencies");
   assertStringArray(record.files, "task.files");
   assertStringArray(record.acceptanceCriteria, "task.acceptanceCriteria");
@@ -47,10 +55,10 @@ export function assertTaskRecord(value: unknown): asserts value is TaskRecord {
 
 export function assertMessageRecord(value: unknown): asserts value is MessageRecord {
   const record = asObject(value, "message");
-  requireString(record.id, "message.id");
-  if (record.taskId !== undefined) requireString(record.taskId, "message.taskId");
-  requireString(record.sender, "message.sender");
-  requireString(record.recipient, "message.recipient");
+  requireSafePathSegment(record.id, "message.id");
+  if (record.taskId !== undefined) requireSafePathSegment(record.taskId, "message.taskId");
+  requireSafePathSegment(record.sender, "message.sender");
+  requireSafePathSegment(record.recipient, "message.recipient");
   requireString(record.body, "message.body");
   requireString(record.createdAt, "message.createdAt");
   if (typeof record.intent !== "string" || !MESSAGE_INTENTS.includes(record.intent as never)) {
@@ -61,10 +69,10 @@ export function assertMessageRecord(value: unknown): asserts value is MessageRec
 
 export function assertConversationRecord(value: unknown): asserts value is ConversationRecord {
   const record = asObject(value, "conversation");
-  requireString(record.id, "conversation.id");
-  requireString(record.taskId, "conversation.taskId");
-  requireString(record.sender, "conversation.sender");
-  if (record.recipient !== undefined) requireString(record.recipient, "conversation.recipient");
+  requireSafePathSegment(record.id, "conversation.id");
+  requireSafePathSegment(record.taskId, "conversation.taskId");
+  requireSafePathSegment(record.sender, "conversation.sender");
+  if (record.recipient !== undefined) requireSafePathSegment(record.recipient, "conversation.recipient");
   if (record.room !== undefined) requireString(record.room, "conversation.room");
   requireString(record.body, "conversation.body");
   requireString(record.createdAt, "conversation.createdAt");
@@ -76,10 +84,10 @@ export function assertConversationRecord(value: unknown): asserts value is Conve
 
 export function assertHandoffRecord(value: unknown): asserts value is HandoffRecord {
   const record = asObject(value, "handoff");
-  requireString(record.id, "handoff.id");
-  requireString(record.taskId, "handoff.taskId");
-  requireString(record.from, "handoff.from");
-  requireString(record.to, "handoff.to");
+  requireSafePathSegment(record.id, "handoff.id");
+  requireSafePathSegment(record.taskId, "handoff.taskId");
+  requireSafePathSegment(record.from, "handoff.from");
+  requireSafePathSegment(record.to, "handoff.to");
   requireString(record.summary, "handoff.summary");
   assertStringArray(record.changedFiles, "handoff.changedFiles");
   assertStringArray(record.remainingWork, "handoff.remainingWork");
@@ -90,9 +98,9 @@ export function assertHandoffRecord(value: unknown): asserts value is HandoffRec
 
 export function assertPresenceRecord(value: unknown): asserts value is PresenceRecord {
   const record = asObject(value, "presence");
-  requireString(record.agent, "presence.agent");
+  requireSafePathSegment(record.agent, "presence.agent");
   requireString(record.status, "presence.status");
-  if (record.taskId !== undefined) requireString(record.taskId, "presence.taskId");
+  if (record.taskId !== undefined) requireSafePathSegment(record.taskId, "presence.taskId");
   assertStringArray(record.files, "presence.files");
   if (typeof record.canAcceptWork !== "boolean") {
     throw new ProtocolError("presence.canAcceptWork must be a boolean");
