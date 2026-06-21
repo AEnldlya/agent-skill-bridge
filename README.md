@@ -159,7 +159,7 @@ For always-on monitoring, run:
 agent-bridge listen --agent codex
 ```
 
-`listen` polls the recipient inbox and prints new messages, marking actionable intents such as `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff`. It can be run by a terminal, supervisor, hook, or future daemon. A model prompt by itself cannot listen continuously; something outside the model has to keep the listener running and wake the agent/runtime.
+`listen` polls the recipient inbox and prints new messages, marking actionable intents such as `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff`. Prefer `review_request` over legacy `review`, and `blocker` over legacy `blocked`, for new messages. The legacy intents stay valid for existing bridge records and automations. It can be run by a terminal, supervisor, hook, or future daemon. A model prompt by itself cannot listen continuously; something outside the model has to keep the listener running and wake the agent/runtime.
 
 ## Safe `--force`
 

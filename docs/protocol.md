@@ -104,6 +104,8 @@ Valid intents:
 - `spawn_agents`
 - `hold`
 
+Prefer `review_request` over legacy `review`, and `blocker` over legacy `blocked`, for new messages. The legacy intents remain valid so older inbox records and existing automations keep working.
+
 Inbox records are addressed work items. Logs are history. Agents should not delete or rewrite another agent's inbox records.
 
 Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as actionable immediately.

@@ -49,7 +49,7 @@ agent-bridge presence update --agent codex --task TASK-ID --status working --fil
 
 ## Ask Claude For Help
 
-Use specific intents: `question`, `answer`, `proposal`, `accept`, `reject`, `decision`, `request`, `delegate`, `spawn_agents`, `review_request`, `blocker`, `hold`, `handoff`, `status`, and `note`.
+Use specific intents: `question`, `answer`, `proposal`, `accept`, `reject`, `decision`, `request`, `delegate`, `spawn_agents`, `review_request`, `blocker`, `hold`, `handoff`, `status`, and `note`. Prefer `review_request` over legacy `review`, and `blocker` over legacy `blocked`, for new messages.
 
 Treat `hold`, `blocked`, `blocker`, `question`, `delegate`, `spawn_agents`, `review`, `review_request`, and `handoff` as immediately actionable.
 

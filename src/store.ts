@@ -793,7 +793,7 @@ Use \`.agent-bridge/\` as the source of truth when Claude, Codex, helper agents,
 
 ## Intents
 
-Use specific intents so the recipient knows whether action is required: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`.
+Use specific intents so the recipient knows whether action is required: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Prefer \`review_request\` over legacy \`review\`, and \`blocker\` over legacy \`blocked\`, for new messages.
 
 Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
@@ -833,7 +833,7 @@ Before editing:
 6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 7. Claim your task with \`agent-bridge task claim TASK-ID --agent codex --files path/to/file\`.
 
-Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Prefer \`review_request\` over legacy \`review\`, and \`blocker\` over legacy \`blocked\`, for new messages. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
 For planning:
 
@@ -905,7 +905,7 @@ Before editing:
 6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
 7. Claim your task with \`agent-bridge task claim TASK-ID --agent claude --files path/to/file\`.
 
-Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Prefer \`review_request\` over legacy \`review\`, and \`blocker\` over legacy \`blocked\`, for new messages. Treat \`hold\`, \`blocked\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review\`, \`review_request\`, and \`handoff\` as immediately actionable.
 
 For planning:
 
