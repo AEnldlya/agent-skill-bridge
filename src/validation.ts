@@ -1,7 +1,9 @@
 import {
+  ConversationRecord,
   HandoffRecord,
   MESSAGE_INTENTS,
   MessageRecord,
+  PresenceRecord,
   PROTOCOL_VERSION,
   ProtocolError,
   TASK_STATUSES,
@@ -57,6 +59,21 @@ export function assertMessageRecord(value: unknown): asserts value is MessageRec
   assertStringArray(record.files, "message.files");
 }
 
+export function assertConversationRecord(value: unknown): asserts value is ConversationRecord {
+  const record = asObject(value, "conversation");
+  requireString(record.id, "conversation.id");
+  requireString(record.taskId, "conversation.taskId");
+  requireString(record.sender, "conversation.sender");
+  if (record.recipient !== undefined) requireString(record.recipient, "conversation.recipient");
+  if (record.room !== undefined) requireString(record.room, "conversation.room");
+  requireString(record.body, "conversation.body");
+  requireString(record.createdAt, "conversation.createdAt");
+  if (typeof record.intent !== "string" || !MESSAGE_INTENTS.includes(record.intent as never)) {
+    throw new ProtocolError(`conversation.intent must be one of ${MESSAGE_INTENTS.join(", ")}`);
+  }
+  assertStringArray(record.files, "conversation.files");
+}
+
 export function assertHandoffRecord(value: unknown): asserts value is HandoffRecord {
   const record = asObject(value, "handoff");
   requireString(record.id, "handoff.id");
@@ -69,6 +86,18 @@ export function assertHandoffRecord(value: unknown): asserts value is HandoffRec
   assertStringArray(record.risks, "handoff.risks");
   assertStringArray(record.verification, "handoff.verification");
   requireString(record.createdAt, "handoff.createdAt");
+}
+
+export function assertPresenceRecord(value: unknown): asserts value is PresenceRecord {
+  const record = asObject(value, "presence");
+  requireString(record.agent, "presence.agent");
+  requireString(record.status, "presence.status");
+  if (record.taskId !== undefined) requireString(record.taskId, "presence.taskId");
+  assertStringArray(record.files, "presence.files");
+  if (typeof record.canAcceptWork !== "boolean") {
+    throw new ProtocolError("presence.canAcceptWork must be a boolean");
+  }
+  requireString(record.lastSeen, "presence.lastSeen");
 }
 
 export function assertProtocolVersion(value: unknown): void {

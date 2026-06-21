@@ -32,11 +32,39 @@ test("creates, claims, messages, and handoffs through protocol files", async () 
       recipient: "claude",
       taskId: task.id,
       from: "agent-a",
-      intent: "question",
-      body: "Can you review this?"
+      intent: "spawn_agents",
+      body: "Goal: run parallel checks. Count: 2."
     });
     assert.equal(message.taskId, task.id);
     assert.equal(message.recipient, "claude");
+    assert.equal(message.intent, "spawn_agents");
+
+    const conversation = await store.appendConversation({
+      taskId: task.id,
+      from: "agent-a",
+      recipient: "agent-b",
+      intent: "proposal",
+      body: "Proposal: split CLI and store work.",
+      files: ["src/cli.ts"]
+    });
+    assert.equal(conversation.taskId, task.id);
+    assert.equal(conversation.intent, "proposal");
+
+    const planPath = await store.writePlan({
+      taskId: task.id,
+      from: "agent-a",
+      body: "Goal: finish bridge CLI.\nSteps: implement, test, document."
+    });
+    assert.match(await readFile(planPath, "utf8"), /Goal: finish bridge CLI/);
+
+    const presence = await store.updatePresence({
+      agent: "agent-a",
+      status: "working",
+      taskId: task.id,
+      files: ["src/cli.ts"],
+      canAcceptWork: false
+    });
+    assert.equal(presence.canAcceptWork, false);
 
     const handoff = await store.handoff({
       taskId: task.id,
@@ -56,7 +84,23 @@ test("creates, claims, messages, and handoffs through protocol files", async () 
     const inboxMessage = JSON.parse(
       await readFile(path.join(root, ".agent-bridge", "inbox", "claude", `${message.id}.json`), "utf8")
     );
-    assert.equal(inboxMessage.intent, "question");
+    assert.equal(inboxMessage.intent, "spawn_agents");
+
+    const conversationRaw = await readFile(
+      path.join(root, ".agent-bridge", "conversations", `${task.id}.jsonl`),
+      "utf8"
+    );
+    assert.match(conversationRaw, /split CLI and store work/);
+
+    const presenceRaw = JSON.parse(await readFile(path.join(root, ".agent-bridge", "presence", "agent-a.json"), "utf8"));
+    assert.equal(presenceRaw.status, "working");
+
+    const inboxMessages = await store.listInboxMessages("claude");
+    assert.equal(inboxMessages.length, 1);
+    assert.equal(inboxMessages[0].message.intent, "spawn_agents");
+
+    const report = await store.validate();
+    assert.equal(report.ok, true);
   });
 });
 
@@ -136,6 +180,8 @@ test("installTemplates writes AGENTS.md and CLAUDE.md without duplicating sectio
     assert.match(agents, /^# Existing Agent Notes/m);
     assert.equal(sectionCount(agents, "## Agent Skill Bridge"), 1);
     assert.equal(sectionCount(claude, "## Agent Skill Bridge"), 1);
+    assert.match(agents, /conversation append/);
+    assert.match(claude, /spawn_agents/);
 
     const secondInstall = await store.installTemplates();
     assert.deepEqual(secondInstall.installed, []);

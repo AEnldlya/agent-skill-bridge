@@ -2,12 +2,15 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   BRIDGE_DIR,
+  ConversationRecord,
   ConflictRecord,
   HandoffRecord,
+  InboxMessage,
   makeId,
   MessageIntent,
   MessageRecord,
   nowIso,
+  PresenceRecord,
   StatusSnapshot,
   TASK_STATUSES,
   TaskRecord,
@@ -15,8 +18,10 @@ import {
   ValidationReport
 } from "./protocol.js";
 import {
+  assertConversationRecord,
   assertHandoffRecord,
   assertMessageRecord,
+  assertPresenceRecord,
   assertTaskRecord,
   requireString
 } from "./validation.js";
@@ -48,6 +53,30 @@ export interface SendMessageInput {
   intent?: MessageIntent;
   body: string;
   files?: string[];
+}
+
+export interface AppendConversationInput {
+  taskId: string;
+  from: string;
+  recipient?: string;
+  room?: string;
+  intent?: MessageIntent;
+  body: string;
+  files?: string[];
+}
+
+export interface WritePlanInput {
+  taskId: string;
+  body: string;
+  from?: string;
+}
+
+export interface UpdatePresenceInput {
+  agent: string;
+  status?: string;
+  taskId?: string;
+  files?: string[];
+  canAcceptWork?: boolean;
 }
 
 export interface HandoffInput {
@@ -87,6 +116,10 @@ export class BridgeStore {
       mkdir(path.join(this.bridgeDir, "skills", "codex"), { recursive: true }),
       mkdir(path.join(this.bridgeDir, "skills", "claude"), { recursive: true }),
       mkdir(path.join(this.bridgeDir, "logs"), { recursive: true }),
+      mkdir(path.join(this.bridgeDir, "conversations"), { recursive: true }),
+      mkdir(path.join(this.bridgeDir, "plans"), { recursive: true }),
+      mkdir(path.join(this.bridgeDir, "presence"), { recursive: true }),
+      mkdir(path.join(this.bridgeDir, "listeners"), { recursive: true }),
       ...TASK_STATUSES.map((status) => mkdir(this.taskStatusDir(status), { recursive: true }))
     ]);
     await this.ensureFile(this.logPath("messages.jsonl"));
@@ -183,6 +216,64 @@ export class BridgeStore {
     return message;
   }
 
+  async appendConversation(input: AppendConversationInput): Promise<ConversationRecord> {
+    await this.init();
+    const conversation: ConversationRecord = {
+      id: makeId("CONVO"),
+      taskId: requireString(input.taskId, "taskId"),
+      sender: requireString(input.from, "from"),
+      recipient: input.recipient ? requireString(input.recipient, "recipient") : undefined,
+      room: input.room ? requireString(input.room, "room") : input.taskId,
+      intent: input.intent ?? "note",
+      body: requireString(input.body, "body"),
+      createdAt: nowIso(),
+      files: input.files ?? []
+    };
+    assertConversationRecord(conversation);
+    await this.appendJsonLine(path.join(this.bridgeDir, "conversations", `${conversation.taskId}.jsonl`), conversation);
+    return conversation;
+  }
+
+  async writePlan(input: WritePlanInput): Promise<string> {
+    await this.init();
+    const taskId = requireString(input.taskId, "taskId");
+    const body = requireString(input.body, "body");
+    const heading = `# Plan: ${taskId}`;
+    const attribution = input.from ? `\n\nUpdated by: ${requireString(input.from, "from")}\n` : "";
+    const content = body.startsWith("#") ? `${body.replace(/\s+$/, "")}\n` : `${heading}${attribution}\n${body.replace(/\s+$/, "")}\n`;
+    const filePath = path.join(this.bridgeDir, "plans", `${taskId}.md`);
+    await writeFile(filePath, content, "utf8");
+    return filePath;
+  }
+
+  async updatePresence(input: UpdatePresenceInput): Promise<PresenceRecord> {
+    await this.init();
+    const presence: PresenceRecord = {
+      agent: requireString(input.agent, "agent"),
+      status: input.status ? requireString(input.status, "status") : "available",
+      taskId: input.taskId ? requireString(input.taskId, "taskId") : undefined,
+      files: input.files ?? [],
+      canAcceptWork: input.canAcceptWork ?? true,
+      lastSeen: nowIso()
+    };
+    assertPresenceRecord(presence);
+    await writeJson(path.join(this.bridgeDir, "presence", `${presence.agent}.json`), presence);
+    return presence;
+  }
+
+  async listInboxMessages(agent: string): Promise<InboxMessage[]> {
+    await this.init();
+    const inboxDir = path.join(this.bridgeDir, "inbox", requireString(agent, "agent"));
+    const messages: InboxMessage[] = [];
+    for (const entry of await readdir(inboxDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const parsed = JSON.parse(await readFile(path.join(inboxDir, entry.name), "utf8")) as unknown;
+      assertMessageRecord(parsed);
+      messages.push({ fileName: entry.name, message: parsed });
+    }
+    return messages.sort((a, b) => a.message.createdAt.localeCompare(b.message.createdAt));
+  }
+
   async handoff(input: HandoffInput): Promise<HandoffRecord> {
     await this.init();
     const task = await this.readTask(input.taskId);
@@ -277,6 +368,8 @@ export class BridgeStore {
 
     await this.validateJsonLines("messages.jsonl", assertMessageRecord, errors);
     await this.validateJsonLines("handoffs.jsonl", assertHandoffRecord, errors);
+    await this.validateConversations(errors);
+    await this.validatePresence(errors);
 
     const tasks = await this.listTasks().catch((error: unknown) => {
       errors.push(formatUnknownError(error));
@@ -441,6 +534,40 @@ export class BridgeStore {
     }
   }
 
+  private async validateConversations(errors: string[]): Promise<void> {
+    const dir = path.join(this.bridgeDir, "conversations");
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const filePath = path.join(dir, entry.name);
+      const raw = await readFile(filePath, "utf8");
+      let lineNumber = 0;
+      for (const line of raw.split(/\r?\n/)) {
+        lineNumber += 1;
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line) as unknown;
+          assertConversationRecord(parsed);
+        } catch (error) {
+          errors.push(`${filePath}:${lineNumber}: ${formatUnknownError(error)}`);
+        }
+      }
+    }
+  }
+
+  private async validatePresence(errors: string[]): Promise<void> {
+    const dir = path.join(this.bridgeDir, "presence");
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const filePath = path.join(dir, entry.name);
+      try {
+        const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+        assertPresenceRecord(parsed);
+      } catch (error) {
+        errors.push(`${filePath}: ${formatUnknownError(error)}`);
+      }
+    }
+  }
+
   private async findConflictsForFiles(files: string[], currentTaskId: string, currentOwner: string): Promise<ConflictRecord[]> {
     const pseudoTask: TaskRecord = {
       id: currentTaskId,
@@ -517,6 +644,37 @@ export async function sendMessage(
     body: input.body,
     files: input.files
   });
+}
+
+export async function appendConversation(
+  root: string,
+  input: {
+    taskId: string;
+    sender: string;
+    recipient?: string;
+    room?: string;
+    intent?: MessageIntent;
+    body: string;
+    files?: string[];
+  }
+): Promise<ConversationRecord> {
+  return new BridgeStore({ root }).appendConversation({
+    taskId: input.taskId,
+    from: input.sender,
+    recipient: input.recipient,
+    room: input.room,
+    intent: input.intent,
+    body: input.body,
+    files: input.files
+  });
+}
+
+export async function writePlan(root: string, input: { taskId: string; body: string; from?: string }): Promise<string> {
+  return new BridgeStore({ root }).writePlan(input);
+}
+
+export async function updatePresence(root: string, input: UpdatePresenceInput): Promise<PresenceRecord> {
+  return new BridgeStore({ root }).updatePresence(input);
 }
 
 export async function createHandoff(
@@ -605,28 +763,78 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 function sharedSkillText(): string {
   return `# Shared Agent Collaboration Skill
 
-Use .agent-bridge as the source of truth when multiple agents work together.
+Use \`.agent-bridge/\` as the source of truth when Claude, Codex, helper agents, or humans work together. Treat the bridge as a live planning room, not only as an update log.
 
-1. Read .agent-bridge/context/*.md before claiming work.
-2. Claim a task before editing files.
-3. Write questions to the other agent's inbox when blocked.
-4. Handoff with changed files, remaining work, risks, and verification.
-5. Do not revert another agent's work without explicit human approval.
+## Start Every Turn
+
+1. Read \`.agent-bridge/context/*.md\`.
+2. Check \`.agent-bridge/inbox/<agent>/\` before editing, pushing, deploying, or answering.
+3. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
+4. Claim work before editing files: \`agent-bridge task claim TASK-ID --agent <agent> --files path/to/file\`.
+5. If another agent owns a file, do not overwrite it without a handoff, inbox agreement, or human approval.
+
+## Conversations And Plans
+
+- Use \`agent-bridge conversation append TASK-ID --from <agent> --intent proposal --body "..."\` for back-and-forth planning.
+- Use \`.agent-bridge/conversations/TASK-ID.jsonl\` as the shared reasoning log.
+- Use \`agent-bridge plan write TASK-ID --from <agent> --body "..."\` for multi-step plans.
+- Keep goals, owners, steps, open questions, decisions, blockers, and verification in the plan.
+- Record durable human-approved conclusions in \`.agent-bridge/context/decisions.md\`.
+
+## Intents
+
+Use specific intents so the recipient knows whether action is required: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`.
+
+Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+
+## Delegation
+
+Agents may ask each other to take work, review work, or spawn helper agents. Delegation is a request until accepted. Reply with \`accept\`, \`reject\`, \`proposal\`, or \`question\`, then claim or create tasks for accepted work.
+
+## Presence And Listening
+
+- Update availability with \`agent-bridge presence update --agent <agent> --status available --task TASK-ID --files path/to/file\`.
+- Run \`agent-bridge listen --agent <agent>\` from a terminal, hook supervisor, or automation when always-on inbox monitoring is needed.
+- Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
+
+## Conflict Gates
+
+Before editing, pushing, deploying, or taking destructive actions, check claimed tasks and fresh \`hold\`, \`blocker\`, or \`review_request\` messages. If plans conflict, pause and resolve the conflict in the task conversation or ask the human.
+
+## Closeout
+
+Before stopping, update the conversation or plan, send a handoff if work remains, run \`agent-bridge validate\`, and mark the task done only when acceptance criteria are satisfied.
 `;
 }
 
 function agentsTemplateText(): string {
   return `## Agent Skill Bridge
 
-\`.agent-bridge/\` is your coordination channel with Claude. The bridge lets you reach Claude without going through the human, so you can keep moving when the human is not present.
+\`.agent-bridge/\` is your coordination channel with Claude, helper agents, and humans. Treat it as a planning room, not only an inbox.
 
 Before editing:
 
 1. Read \`.agent-bridge/context/project.md\`.
 2. Read \`.agent-bridge/context/constraints.md\`.
-3. Check \`.agent-bridge/inbox/codex/\` for questions, answers, reviews, and handoffs from Claude.
-4. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
-5. Claim your task with \`agent-bridge task claim TASK-ID --agent codex --files path/to/file\`.
+3. Read \`.agent-bridge/context/decisions.md\`.
+4. Check \`.agent-bridge/inbox/codex/\` for questions, answers, holds, reviews, handoffs, and delegation from Claude.
+5. Check \`.agent-bridge/conversations/\`, \`.agent-bridge/plans/\`, and \`.agent-bridge/presence/\` for shared work.
+6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
+7. Claim your task with \`agent-bridge task claim TASK-ID --agent codex --files path/to/file\`.
+
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+
+For planning:
+
+\`\`\`bash
+agent-bridge conversation append TASK-ID --from codex --intent proposal \\
+  --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge presence update --agent codex --task TASK-ID --status working --files path/to/file
+agent-bridge listen --agent codex
+\`\`\`
+
+Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
 
 Auto-coordinate before escalating to the human. Reach out to Claude when you:
 
@@ -635,6 +843,7 @@ Auto-coordinate before escalating to the human. Reach out to Claude when you:
 - Are about to take a destructive or hard-to-reverse action whose blast radius is non-obvious.
 - Need a second opinion on an architectural or design tradeoff.
 - Are stuck on something Claude is better at (long-form reasoning, prose, design review, untangling complex specs).
+- Need Claude to review a plan, delegate work, or coordinate helper agents.
 
 Send a structured question:
 
@@ -646,6 +855,8 @@ agent-bridge message send claude \\
   --files path/to/file \\
   --body "Question: ... Context: ... What I tried: ... Needed from you: ..."
 \`\`\`
+
+Claude may ask Codex to spawn helper agents with \`--intent spawn_agents\`. Treat that as a request until accepted; reply with \`accept\`, \`reject\`, \`proposal\`, or \`question\`.
 
 Then re-read \`.agent-bridge/inbox/codex/\` before continuing. If Claude has not replied yet, do other useful work or ask the human. Do not block.
 
@@ -661,6 +872,7 @@ Coordination rules:
 
 - Do not erase Claude's inbox artifacts or task records.
 - If Claude owns a file (it is in a claimed task assigned to claude), do not overwrite it without a handoff, an inbox agreement, or human approval.
+- Before pushing, deploying, or taking destructive actions, check for fresh \`hold\`, \`blocker\`, and \`review_request\` messages.
 - Put durable conclusions in \`.agent-bridge/context/decisions.md\`.
 - Run \`agent-bridge validate\` before stopping. Resolve protocol errors and active conflicts.
 - Before stopping, create a handoff if work remains. Mark the task done only when acceptance criteria are satisfied.
@@ -670,15 +882,31 @@ Coordination rules:
 function claudeTemplateText(): string {
   return `## Agent Skill Bridge
 
-\`.agent-bridge/\` is your coordination channel with Codex. The bridge lets you reach Codex without going through the human, so you can keep moving when the human is not present.
+\`.agent-bridge/\` is your coordination channel with Codex, helper agents, and humans. Treat it as a planning room, not only an inbox.
 
 Before editing:
 
 1. Read \`.agent-bridge/context/project.md\`.
 2. Read \`.agent-bridge/context/constraints.md\`.
-3. Check \`.agent-bridge/inbox/claude/\` for questions, answers, reviews, and handoffs from Codex.
-4. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
-5. Claim your task with \`agent-bridge task claim TASK-ID --agent claude --files path/to/file\`.
+3. Read \`.agent-bridge/context/decisions.md\`.
+4. Check \`.agent-bridge/inbox/claude/\` for questions, answers, holds, reviews, handoffs, and delegation from Codex.
+5. Check \`.agent-bridge/conversations/\`, \`.agent-bridge/plans/\`, and \`.agent-bridge/presence/\` for shared work.
+6. Check \`.agent-bridge/tasks/open/\`, \`.agent-bridge/tasks/claimed/\`, and \`.agent-bridge/tasks/blocked/\`.
+7. Claim your task with \`agent-bridge task claim TASK-ID --agent claude --files path/to/file\`.
+
+Use specific intents: \`question\`, \`answer\`, \`proposal\`, \`accept\`, \`reject\`, \`decision\`, \`request\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, \`blocker\`, \`hold\`, \`handoff\`, \`status\`, and \`note\`. Treat \`hold\`, \`blocker\`, \`question\`, \`delegate\`, \`spawn_agents\`, \`review_request\`, and \`handoff\` as immediately actionable.
+
+For planning:
+
+\`\`\`bash
+agent-bridge conversation append TASK-ID --from claude --intent proposal \\
+  --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
+agent-bridge plan write TASK-ID --from claude --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge presence update --agent claude --task TASK-ID --status working --files path/to/file
+agent-bridge listen --agent claude
+\`\`\`
+
+Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
 
 Auto-coordinate before escalating to the human. Reach out to Codex when you:
 
@@ -687,6 +915,7 @@ Auto-coordinate before escalating to the human. Reach out to Codex when you:
 - Are about to take a destructive or hard-to-reverse action whose blast radius is non-obvious.
 - Need a second opinion on a code tradeoff or architectural call.
 - Are blocked on something Codex is better at (multi-file refactor, long-running shell that you cannot supervise, infra setup, repo-wide grep-and-replace).
+- Need Codex to spawn helper agents, run parallel investigations, or execute a plan.
 
 Send a structured question:
 
@@ -704,9 +933,16 @@ Then re-read \`.agent-bridge/inbox/claude/\` before continuing. If Codex has not
 For review:
 
 \`\`\`bash
-agent-bridge message send codex --from claude --task TASK-ID --intent review \\
+agent-bridge message send codex --from claude --task TASK-ID --intent review_request \\
   --files path/to/file \\
   --body "Findings: ... Questions: ... Test gaps: ... Summary: ..."
+\`\`\`
+
+Ask Codex to spawn helper agents when parallel work would help:
+
+\`\`\`bash
+agent-bridge message send codex --from claude --task TASK-ID --intent spawn_agents \\
+  --body "Goal: ... Count: ... Scopes: ... Expected output: ..."
 \`\`\`
 
 If Codex should take over, hand off:
@@ -721,6 +957,7 @@ Coordination rules:
 
 - Do not erase Codex's inbox artifacts or task records.
 - If Codex owns a file (it is in a claimed task assigned to codex), do not overwrite it without a handoff, an inbox agreement, or human approval.
+- Before pushing, deploying, or taking destructive actions, check for fresh \`hold\`, \`blocker\`, and \`review_request\` messages.
 - Put durable conclusions in \`.agent-bridge/context/decisions.md\`.
 - Run \`agent-bridge validate\` before stopping. Resolve protocol errors and active conflicts.
 - Before stopping, create a handoff if work remains. Mark the task done only when acceptance criteria are satisfied.

@@ -4,8 +4,36 @@ export const PROTOCOL_VERSION = 1;
 export const TASK_STATUSES = ["open", "claimed", "blocked", "done"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
-export const MESSAGE_INTENTS = ["question", "answer", "review", "handoff", "status", "blocked", "note"] as const;
+export const MESSAGE_INTENTS = [
+  "question",
+  "answer",
+  "review",
+  "review_request",
+  "handoff",
+  "status",
+  "blocked",
+  "blocker",
+  "note",
+  "proposal",
+  "accept",
+  "reject",
+  "decision",
+  "request",
+  "delegate",
+  "spawn_agents",
+  "hold"
+] as const;
 export type MessageIntent = (typeof MESSAGE_INTENTS)[number];
+
+export const ACTIONABLE_MESSAGE_INTENTS = [
+  "question",
+  "review_request",
+  "blocker",
+  "delegate",
+  "spawn_agents",
+  "hold",
+  "handoff"
+] as const satisfies readonly MessageIntent[];
 
 export interface TaskRecord {
   id: string;
@@ -32,6 +60,18 @@ export interface MessageRecord {
   files: string[];
 }
 
+export interface ConversationRecord {
+  id: string;
+  taskId: string;
+  sender: string;
+  recipient?: string;
+  room?: string;
+  intent: MessageIntent;
+  body: string;
+  createdAt: string;
+  files: string[];
+}
+
 export interface HandoffRecord {
   id: string;
   taskId: string;
@@ -43,6 +83,20 @@ export interface HandoffRecord {
   risks: string[];
   verification: string[];
   createdAt: string;
+}
+
+export interface PresenceRecord {
+  agent: string;
+  status: string;
+  taskId?: string;
+  files: string[];
+  canAcceptWork: boolean;
+  lastSeen: string;
+}
+
+export interface InboxMessage {
+  fileName: string;
+  message: MessageRecord;
 }
 
 export interface StatusSnapshot {
@@ -78,7 +132,7 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function makeId(prefix: "TASK" | "MSG" | "HANDOFF", date = new Date()): string {
+export function makeId(prefix: "TASK" | "MSG" | "HANDOFF" | "CONVO", date = new Date()): string {
   const stamp = date.toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const random = Math.random().toString(36).slice(2, 8);
   return `${prefix}-${stamp}-${random}`;

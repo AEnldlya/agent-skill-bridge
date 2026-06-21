@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { realpathSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { MESSAGE_INTENTS, MessageIntent } from "./protocol.js";
+import { ACTIONABLE_MESSAGE_INTENTS, MESSAGE_INTENTS, MessageIntent } from "./protocol.js";
 import { BridgeStore } from "./store.js";
 import { parseList } from "./validation.js";
 
@@ -18,6 +20,10 @@ Commands:
   task claim TASK-ID --agent codex [--files src/a.ts] [--force]
   task done TASK-ID
   message send claude --from codex --body "Can you review this?"
+  conversation append TASK-ID --from codex --intent proposal --body "Plan: ..."
+  plan write TASK-ID --from codex --body "Goal: ...\nSteps: ..."
+  presence update --agent codex [--task TASK-ID] [--status available] [--files src/a.ts] [--can-accept-work true]
+  listen --agent codex [--once] [--interval 2000]
   handoff TASK-ID --from codex --to claude --summary "API is ready" [--force]
   status
   validate
@@ -93,6 +99,52 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       files: parseList(stringOption(parsed, "files", false))
     });
     console.log(`Sent ${message.id} to ${message.recipient}`);
+    return;
+  }
+
+  if (command === "conversation" && subcommand === "append") {
+    const conversation = await store.appendConversation({
+      taskId: requiredPositional(maybeId, "task id"),
+      from: stringOption(parsed, "from", false) ?? "human",
+      recipient: stringOption(parsed, "to", false) ?? stringOption(parsed, "recipient", false),
+      room: stringOption(parsed, "room", false),
+      intent: parseIntent(stringOption(parsed, "intent", false)),
+      body: stringOption(parsed, "body", false) ?? rest.join(" "),
+      files: parseList(stringOption(parsed, "files", false))
+    });
+    console.log(`Appended ${conversation.id} to ${conversation.taskId}`);
+    return;
+  }
+
+  if (command === "plan" && subcommand === "write") {
+    const filePath = await store.writePlan({
+      taskId: requiredPositional(maybeId, "task id"),
+      from: stringOption(parsed, "from", false),
+      body: stringOption(parsed, "body", false) ?? rest.join(" ")
+    });
+    console.log(`Wrote ${filePath}`);
+    return;
+  }
+
+  if (command === "presence" && subcommand === "update") {
+    const presence = await store.updatePresence({
+      agent: stringOption(parsed, "agent", true),
+      taskId: stringOption(parsed, "task", false),
+      status: stringOption(parsed, "status", false),
+      files: parseList(stringOption(parsed, "files", false)),
+      canAcceptWork: booleanOption(parsed, "can-accept-work", true)
+    });
+    console.log(`${presence.agent} presence updated: ${presence.status}`);
+    return;
+  }
+
+  if (command === "listen") {
+    await runListener(
+      store,
+      stringOption(parsed, "agent", true),
+      numberOption(parsed, "interval", 2000),
+      Boolean(parsed.options.once)
+    );
     return;
   }
 
@@ -201,6 +253,64 @@ function requiredPositional(value: string | undefined, name: string): string {
 
 function parseIntent(value: string | undefined): MessageIntent {
   return MESSAGE_INTENTS.includes(value as MessageIntent) ? value as MessageIntent : "note";
+}
+
+function numberOption(parsed: ParsedArgs, name: string, fallback: number): number {
+  const value = parsed.options[name];
+  if (typeof value !== "string") return fallback;
+  const parsedNumber = Number(value);
+  return Number.isFinite(parsedNumber) && parsedNumber > 0 ? parsedNumber : fallback;
+}
+
+function booleanOption(parsed: ParsedArgs, name: string, fallback: boolean): boolean {
+  const value = parsed.options[name];
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  return !["false", "0", "no", "off"].includes(value.toLowerCase());
+}
+
+async function runListener(store: BridgeStore, agent: string, intervalMs: number, once: boolean): Promise<void> {
+  const seenPath = path.join(store.bridgeDir, "listeners", `.seen-${agent}.json`);
+  await mkdir(path.dirname(seenPath), { recursive: true });
+
+  while (true) {
+    const seen = await loadSeen(seenPath);
+    const messages = await store.listInboxMessages(agent);
+    const fresh = messages.filter(({ fileName, message }) => seen[fileName] !== message.createdAt);
+
+    for (const { fileName, message } of fresh) {
+      const actionable = ACTIONABLE_MESSAGE_INTENTS.includes(message.intent as never) ? " ACTION" : "";
+      const task = message.taskId ? ` task=${message.taskId}` : "";
+      console.log(`[${message.createdAt}]${actionable} ${message.sender} -> ${message.recipient} ${message.intent}${task}`);
+      console.log(message.body);
+      if (message.files.length > 0) {
+        console.log(`files: ${message.files.join(", ")}`);
+      }
+      console.log("");
+      seen[fileName] = message.createdAt;
+    }
+
+    if (fresh.length > 0) {
+      await writeFile(seenPath, JSON.stringify(seen, null, 2), "utf8");
+    } else if (once) {
+      console.log(`No new messages for ${agent}.`);
+    }
+
+    if (once) return;
+    await delay(Math.max(intervalMs, 250));
+  }
+}
+
+async function loadSeen(seenPath: string): Promise<Record<string, string>> {
+  try {
+    return JSON.parse(await readFile(seenPath, "utf8")) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Detect "this file was invoked directly" in a way that survives symlinks.

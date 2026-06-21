@@ -1,54 +1,50 @@
 ## Agent Skill Bridge
 
-Use `.agent-bridge/` as the coordination source of truth when collaborating with Claude, another agent, or a human across tasks, sessions, or uncertainty.
+`.agent-bridge/` is your coordination channel with Claude, helper agents, and humans. Treat it as a planning room, not only an inbox.
 
-Before starting shared work, inspect:
+Before editing:
 
-1. `.agent-bridge/context/project.md` for product and repo context.
-2. `.agent-bridge/context/constraints.md` for boundaries, ownership notes, and files to avoid.
-3. `.agent-bridge/context/decisions.md` for durable human-approved decisions.
-4. `.agent-bridge/inbox/codex/` for questions, answers, reviews, handoffs, and status messages addressed to Codex.
-5. `.agent-bridge/tasks/open/`, `.agent-bridge/tasks/claimed/`, and `.agent-bridge/tasks/blocked/` for task state.
+1. Read `.agent-bridge/context/project.md`.
+2. Read `.agent-bridge/context/constraints.md`.
+3. Read `.agent-bridge/context/decisions.md`.
+4. Check `.agent-bridge/inbox/codex/` for questions, answers, holds, reviews, handoffs, and delegation from Claude.
+5. Check `.agent-bridge/conversations/`, `.agent-bridge/plans/`, and `.agent-bridge/presence/` for shared work.
+6. Check `.agent-bridge/tasks/open/`, `.agent-bridge/tasks/claimed/`, and `.agent-bridge/tasks/blocked/`.
+7. Claim your task with `agent-bridge task claim TASK-ID --agent codex --files path/to/file`.
 
-Claim a task before editing files:
+Use specific intents: `question`, `answer`, `proposal`, `accept`, `reject`, `decision`, `request`, `delegate`, `spawn_agents`, `review_request`, `blocker`, `hold`, `handoff`, `status`, and `note`.
+
+Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as immediately actionable.
+
+For planning:
 
 ```bash
-agent-bridge task claim TASK-ID --agent codex --files src/file.ts,test/file.test.ts
+agent-bridge conversation append TASK-ID --from codex --intent proposal \
+  --files path/to/file --body "Proposal: ... Risks: ... Verification: ..."
+agent-bridge plan write TASK-ID --from codex --body "Goal: ... Steps: ... Open questions: ..."
+agent-bridge presence update --agent codex --task TASK-ID --status working --files path/to/file
+agent-bridge listen --agent codex
 ```
 
-If the claim reports a file conflict, pause and coordinate with Claude or the human. Use `--force` only after the overlap is intentional and approved by a handoff, inbox agreement, or human instruction.
+Prompts alone cannot make agents always listen; a watcher, hook, daemon, or terminal process must wake the agent/runtime.
 
-Ask Claude for focused review, reasoning, design tradeoffs, debugging hypotheses, writing, or a second opinion:
+Auto-coordinate before escalating to the human. Reach out to Claude when you are looping, blocked, about to take a risky action, need review, need a plan checked, or need help coordinating helper agents.
+
+Send a structured question:
 
 ```bash
 agent-bridge message send claude \
   --from codex \
   --task TASK-ID \
   --intent question \
-  --files src/file.ts,test/file.test.ts \
+  --files path/to/file \
   --body "Question: ... Context: ... What I tried: ... Needed from you: ..."
 ```
 
-Use handoffs when Claude should continue, review, verify, or take ownership:
+Claude may ask Codex to spawn helper agents with `--intent spawn_agents`. Treat that as a request until accepted; reply with `accept`, `reject`, `proposal`, or `question`.
 
-```bash
-agent-bridge handoff TASK-ID \
-  --from codex \
-  --to claude \
-  --summary "What changed and why." \
-  --files src/file.ts,test/file.test.ts \
-  --remaining "Specific next step for Claude" \
-  --risks "Known risk or uncertainty" \
-  --verification "Command run and result"
-```
+Before pushing, deploying, or taking destructive actions, check for fresh `hold`, `blocker`, and `review_request` messages.
 
-Coordination rules:
+Do not erase Claude's inbox artifacts or task records. If Claude owns a file, do not overwrite it without a handoff, inbox agreement, or human approval. Put durable conclusions in `.agent-bridge/context/decisions.md`.
 
-- Do not erase Claude's inbox artifacts or task records.
-- Do not assume hidden chat context will survive. Put important state in bridge files.
-- If Claude owns a file, do not overwrite it without a handoff, an inbox agreement, or human approval.
-- `--force` bypasses conflict detection only for an intentional overlap. It does not merge source changes or permit reverting another agent's work.
-- Put durable conclusions in `.agent-bridge/context/decisions.md`.
-- Run `agent-bridge validate` before stopping.
-
-Before stopping, resolve protocol errors and active conflicts when possible. Create a handoff with changed files, remaining work, risks, and verification if another agent or future session should continue.
+Run `agent-bridge validate` before stopping. Update the conversation or plan, and create a handoff if work remains.

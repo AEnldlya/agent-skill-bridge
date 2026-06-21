@@ -16,6 +16,9 @@ Fill in the durable context files before asking agents to coordinate:
 .agent-bridge/context/project.md
 .agent-bridge/context/constraints.md
 .agent-bridge/context/decisions.md
+.agent-bridge/conversations/
+.agent-bridge/plans/
+.agent-bridge/presence/
 ```
 
 ## 2. Create A Task
@@ -36,6 +39,27 @@ agent-bridge task claim TASK-ID --agent codex --files src/auth.ts
 ```
 
 Codex edits `src/auth.ts`, adds tests, and asks Claude for targeted help:
+
+```bash
+agent-bridge conversation append TASK-ID \
+  --from codex \
+  --to claude \
+  --intent proposal \
+  --files src/auth.ts,test/auth.test.ts \
+  --body "Proposal: Codex owns src/auth.ts and tests. Claude reviews edge cases and then owns src/Login.tsx. Verification: npm test."
+```
+
+Codex writes a compact shared plan:
+
+```bash
+agent-bridge plan write TASK-ID --from codex --body "Goal: login works with validation. Steps: backend helper, Claude review, UI wiring, test. Open questions: expiry edge cases."
+```
+
+Codex can also advertise presence:
+
+```bash
+agent-bridge presence update --agent codex --task TASK-ID --status working --files src/auth.ts,test/auth.test.ts --can-accept-work false
+```
 
 ```bash
 agent-bridge message send claude \
@@ -67,10 +91,24 @@ After adding the empty-password guard, Codex asks Claude to review the backend s
 agent-bridge message send claude \
   --from codex \
   --task TASK-ID \
-  --intent review \
+  --intent review_request \
   --files src/auth.ts,test/auth.test.ts \
   --body "Findings requested: please review the auth helper and test coverage before UI wiring. Questions: are expiry and empty-password paths covered? Test gaps: call out anything missing. Summary: backend slice is ready for handoff if clean."
 ```
+
+## 5b. Claude Delegates Parallel Work
+
+If Claude wants Codex to run helper agents or parallel investigations, Claude sends an actionable request instead of a loose status note:
+
+```bash
+agent-bridge message send codex \
+  --from claude \
+  --task TASK-ID \
+  --intent spawn_agents \
+  --body "Goal: compare auth edge cases across API and UI. Count: 2. Scopes: src/auth.ts, src/Login.tsx. Expected output: missing tests and risky flows."
+```
+
+Codex replies with `accept`, `reject`, `proposal`, or `question` before doing the delegated work.
 
 ## 6. Claude Claims The UI File
 
@@ -142,6 +180,15 @@ agent-bridge status
 ```
 
 The human can inspect `.agent-bridge/logs/messages.jsonl`, `.agent-bridge/logs/handoffs.jsonl`, and each agent inbox to see how the agents discussed the task.
+
+For always-on monitoring, a terminal or supervisor can run:
+
+```bash
+agent-bridge listen --agent codex
+agent-bridge listen --agent claude
+```
+
+The listener prints new inbox messages and marks actionable ones. It is the runtime piece that makes "always listening" possible; prompts alone do not keep an agent awake.
 
 When acceptance criteria are satisfied:
 

@@ -1,6 +1,6 @@
 # Protocol
 
-`agent-skill-bridge` uses plain files under `.agent-bridge/`. The protocol is intentionally boring: JSON task records for current state, JSON inbox records for agent-to-agent messages, JSONL logs for history, and Markdown context files for decisions humans and agents need later.
+`agent-skill-bridge` uses plain files under `.agent-bridge/`. The protocol is intentionally boring: JSON task records for current state, JSON inbox records for agent-to-agent messages, JSONL conversations for planning, Markdown plans for multi-step work, JSON presence files for availability, JSONL logs for history, and Markdown context files for decisions humans and agents need later.
 
 ## Directory Layout
 
@@ -23,6 +23,15 @@
     shared/
     codex/
     claude/
+  conversations/
+    TASK-ID.jsonl
+  plans/
+    TASK-ID.md
+  presence/
+    codex.json
+    claude.json
+  listeners/
+    .seen-codex.json
   logs/
     messages.jsonl
     tasks.jsonl
@@ -80,12 +89,90 @@ Valid intents:
 - `question`
 - `answer`
 - `review`
+- `review_request`
 - `handoff`
 - `status`
 - `blocked`
+- `blocker`
 - `note`
+- `proposal`
+- `accept`
+- `reject`
+- `decision`
+- `request`
+- `delegate`
+- `spawn_agents`
+- `hold`
 
 Inbox records are addressed work items. Logs are history. Agents should not delete or rewrite another agent's inbox records.
+
+Treat `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff` as actionable immediately.
+
+## Conversation Records
+
+Conversations are append-only task-linked JSONL files at `.agent-bridge/conversations/TASK-ID.jsonl`. Use them when agents need to compare options, negotiate ownership, tell each other what to do, request helper agents, or plan together.
+
+```json
+{
+  "id": "CONVO-20260509124500-jkl012",
+  "taskId": "TASK-20260509123000-abc123",
+  "sender": "codex",
+  "recipient": "claude",
+  "room": "TASK-20260509123000-abc123",
+  "intent": "proposal",
+  "body": "Proposal: Codex owns API, Claude reviews UX copy.",
+  "createdAt": "2026-05-09T12:45:00.000Z",
+  "files": ["src/auth.ts"]
+}
+```
+
+Append through:
+
+```bash
+agent-bridge conversation append TASK-ID --from codex --to claude --intent proposal --body "Proposal: ..."
+```
+
+## Plan Files
+
+Plans are Markdown files at `.agent-bridge/plans/TASK-ID.md`. Use them for multi-step shared work.
+
+Recommended sections:
+
+- Goal and acceptance criteria.
+- Current owner and supporting agents.
+- Step list with status.
+- Files and boundaries.
+- Open questions.
+- Decisions made.
+- Blockers and escalation owner.
+- Verification required before done.
+
+Write or replace a plan through:
+
+```bash
+agent-bridge plan write TASK-ID --from codex --body "Goal: ...\nSteps: ...\nVerification: ..."
+```
+
+## Presence Records
+
+Presence files live at `.agent-bridge/presence/<agent>.json`.
+
+```json
+{
+  "agent": "codex",
+  "status": "working",
+  "taskId": "TASK-20260509123000-abc123",
+  "files": ["src/auth.ts"],
+  "canAcceptWork": false,
+  "lastSeen": "2026-05-09T12:50:00.000Z"
+}
+```
+
+Update presence through:
+
+```bash
+agent-bridge presence update --agent codex --task TASK-ID --status working --files src/auth.ts --can-accept-work false
+```
 
 ## Handoff Records
 
@@ -170,6 +257,8 @@ Validation checks:
 - task files live under the directory matching their `status`,
 - `messages.jsonl` contains valid message records,
 - `handoffs.jsonl` contains valid handoff records,
+- conversation JSONL files contain valid conversation records,
+- presence JSON files contain valid presence records,
 - claimed tasks have owners,
 - tasks without acceptance criteria are called out as warnings,
 - active file conflicts are reported.
@@ -182,15 +271,29 @@ The protocol helps agents coordinate. It does not make decisions for the human. 
 
 Human-approved decisions that future sessions need should be summarized in `.agent-bridge/context/decisions.md`, not left only in chat or inbox messages.
 
+## Always Listening
+
+Models do not continuously listen on their own. Always-on behavior requires a watcher, hook, terminal process, supervisor, or daemon outside the model.
+
+The built-in listener polls a recipient inbox and prints new messages:
+
+```bash
+agent-bridge listen --agent codex
+agent-bridge listen --agent claude --once
+```
+
+The listener stores cursor files in `.agent-bridge/listeners/`. It marks actionable intents in output so an external runtime can wake the right agent for `hold`, `blocker`, `question`, `delegate`, `spawn_agents`, `review_request`, and `handoff`.
+
 ## Lifecycle
 
 1. Read `.agent-bridge/context/*.md` before taking work.
 2. Create a task or inspect existing task records.
 3. Claim the task before editing files.
-4. Send `question`, `blocked`, `status`, or `review` messages when another agent's help would reduce risk.
-5. Use a handoff when ownership changes or when a different agent should continue.
-6. Run `agent-bridge validate`.
-7. Mark the task `done` only after acceptance criteria are satisfied.
+4. Use `conversation append` and `plan write` for substantial shared planning.
+5. Send `question`, `blocker`, `status`, `delegate`, `spawn_agents`, or `review_request` messages when another agent's help would reduce risk.
+6. Use a handoff when ownership changes or when a different agent should continue.
+7. Run `agent-bridge validate`.
+8. Mark the task `done` only after acceptance criteria are satisfied.
 
 ## Codex And Claude Help Loop
 
@@ -199,8 +302,9 @@ The intended collaboration loop is:
 1. Codex handles concrete implementation, repo edits, test runs, and verification.
 2. Claude helps with reasoning, review, architecture questions, writing, or second-opinion checks.
 3. Either agent can ask the other for help through an inbox message tied to the task and files.
-4. Either agent can hand work off with structured remaining work, risks, and verification.
-5. Both agents keep important conclusions in bridge files so future sessions inherit the context.
+4. Either agent can propose plans, accept or reject delegation, and request helper agents.
+5. Either agent can hand work off with structured remaining work, risks, and verification.
+6. Both agents keep important conclusions in bridge files so future sessions inherit the context.
 
 This loop is a convention, not a hard role limit. The task owner is responsible for naming the files they touch, requesting help early, and leaving enough state for the next actor.
 
@@ -243,3 +347,22 @@ Blocking risk: ...
 ```
 
 For `handoff`, prefer the dedicated `agent-bridge handoff` command.
+
+For `spawn_agents`:
+
+```text
+Goal: ...
+Count: ...
+Scopes: ...
+Expected output: ...
+```
+
+For `proposal`:
+
+```text
+Proposal: ...
+Tradeoffs: ...
+Files: ...
+Verification: ...
+Needed decision: ...
+```
